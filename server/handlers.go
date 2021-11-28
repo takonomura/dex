@@ -455,6 +455,12 @@ func (s *Server) handleConnectorCallback(w http.ResponseWriter, r *http.Request)
 // finalizeLogin associates the user's identity with the current AuthRequest, then returns
 // the approval page's path.
 func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.AuthRequest, conn connector.Connector) (string, error) {
+	var err error
+	identity, err = s.opaEvalPolicy(authReq.ConnectorID, identity)
+	if err != nil {
+		return "", fmt.Errorf("failed to evaluate policy: %v", err)
+	}
+
 	claims := storage.Claims{
 		UserID:            identity.UserID,
 		Username:          identity.Username,

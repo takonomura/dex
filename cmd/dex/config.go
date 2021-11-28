@@ -49,6 +49,8 @@ type Config struct {
 	// querying the storage. Cannot be specified without enabling a passwords
 	// database.
 	StaticPasswords []password `json:"staticPasswords"`
+
+	OPAPolicyURL string `json:"opaPolicyURL"`
 }
 
 // Validate the configuration
