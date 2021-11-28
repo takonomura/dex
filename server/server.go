@@ -104,6 +104,8 @@ type Config struct {
 	PrometheusRegistry *prometheus.Registry
 
 	HealthChecker gosundheit.Health
+
+	OPAPolicyURL string
 }
 
 // WebConfig holds the server's frontend templates and asset configuration.
@@ -181,6 +183,8 @@ type Server struct {
 	refreshTokenPolicy *RefreshTokenPolicy
 
 	logger log.Logger
+
+	opaPolicyURL string
 }
 
 // NewServer constructs a server from the provided config.
@@ -270,6 +274,7 @@ func newServer(ctx context.Context, c Config, rotationStrategy rotationStrategy)
 		templates:              tmpls,
 		passwordConnector:      c.PasswordConnector,
 		logger:                 c.Logger,
+		opaPolicyURL:           c.OPAPolicyURL,
 	}
 
 	// Retrieves connector objects in backend storage. This list includes the static connectors

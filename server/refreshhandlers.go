@@ -187,6 +187,11 @@ func (s *Server) refreshWithConnector(ctx context.Context, token *internal.Refre
 			s.logger.Errorf("failed to refresh identity: %v", err)
 			return connector.Identity{}, newInternalServerError()
 		}
+		newIdent, err = s.opaEvalPolicy(refresh.ConnectorID, newIdent)
+		if err != nil {
+			s.logger.Errorf("failed to evalute policy: %v", err)
+			return connector.Identity{}, newInternalServerError()
+		}
 		ident = newIdent
 	}
 
