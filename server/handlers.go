@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -361,6 +362,12 @@ func (s *Server) handlePasswordLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		redirectURL, err := s.finalizeLogin(identity, authReq, conn.Connector)
 		if err != nil {
+			var denyErr opaDenyError
+			if errors.As(err, &denyErr) {
+				s.logger.Errorf("denied by policy: %v", err)
+				s.renderError(r, w, http.StatusBadRequest, denyErr.Error())
+				return
+			}
 			s.logger.Errorf("Failed to finalize login: %v", err)
 			s.renderError(r, w, http.StatusInternalServerError, "Login error.")
 			return
@@ -444,6 +451,12 @@ func (s *Server) handleConnectorCallback(w http.ResponseWriter, r *http.Request)
 
 	redirectURL, err := s.finalizeLogin(identity, authReq, conn.Connector)
 	if err != nil {
+		var denyErr opaDenyError
+		if errors.As(err, &denyErr) {
+			s.logger.Errorf("denied by policy: %v", err)
+			s.renderError(r, w, http.StatusBadRequest, denyErr.Error())
+			return
+		}
 		s.logger.Errorf("Failed to finalize login: %v", err)
 		s.renderError(r, w, http.StatusInternalServerError, "Login error.")
 		return
@@ -458,7 +471,7 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 	var err error
 	identity, err = s.opaEvalPolicy(authReq.ConnectorID, identity)
 	if err != nil {
-		return "", fmt.Errorf("failed to evaluate policy: %v", err)
+		return "", fmt.Errorf("evaluate policy: %w", err)
 	}
 
 	claims := storage.Claims{

@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -32,7 +31,14 @@ type (
 		Deny             []string    `json:"deny"`
 		OverrideIdentity opaIdentity `json:"override_identity"`
 	}
+	opaDenyError struct {
+		Messages []string
+	}
 )
+
+func (e opaDenyError) Error() string {
+	return strings.Join(e.Messages, "\n")
+}
 
 func (s *Server) opaEvalPolicy(connectorID string, identity connector.Identity) (connector.Identity, error) {
 	if s.opaPolicyURL == "" {
@@ -87,7 +93,7 @@ func (s *Server) opaEvalPolicy(connectorID string, identity connector.Identity) 
 	}
 
 	if len(res.Result.Deny) > 0 {
-		return connector.Identity{}, errors.New(strings.Join(res.Result.Deny, "\n"))
+		return connector.Identity{}, opaDenyError{Messages: res.Result.Deny}
 	}
 
 	if res.Result.OverrideIdentity.UserID != nil {
