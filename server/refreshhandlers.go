@@ -189,6 +189,11 @@ func (s *Server) refreshWithConnector(ctx context.Context, token *internal.Refre
 		}
 		newIdent, err = s.opaEvalPolicy(refresh.ConnectorID, newIdent)
 		if err != nil {
+			var denyErr opaDenyError
+			if errors.As(err, &denyErr) {
+				s.logger.Errorf("denied by policy: %v", err)
+				return connector.Identity{}, newBadRequestError(denyErr.Error())
+			}
 			s.logger.Errorf("failed to evalute policy: %v", err)
 			return connector.Identity{}, newInternalServerError()
 		}
