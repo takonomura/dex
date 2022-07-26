@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/net/html"
+
 	"github.com/dexidp/dex/pkg/log"
 	"github.com/dexidp/dex/storage"
 )
@@ -141,6 +143,10 @@ func (s *Server) handleDeviceCode(w http.ResponseWriter, r *http.Request) {
 		// https://tools.ietf.org/html/rfc8628#section-3.2
 		w.Header().Set("Cache-Control", "no-store")
 
+		// Response type should be application/json according to
+		// https://datatracker.ietf.org/doc/html/rfc6749#section-5.1
+		w.Header().Set("Content-Type", "application/json")
+
 		enc := json.NewEncoder(w)
 		enc.SetEscapeHTML(false)
 		enc.SetIndent("", "   ")
@@ -247,7 +253,9 @@ func (s *Server) handleDeviceCallback(w http.ResponseWriter, r *http.Request) {
 
 		// Authorization redirect callback from OAuth2 auth flow.
 		if errMsg := r.FormValue("error"); errMsg != "" {
-			http.Error(w, errMsg+": "+r.FormValue("error_description"), http.StatusBadRequest)
+			// escape the message to prevent cross-site scripting
+			msg := html.EscapeString(errMsg + ": " + r.FormValue("error_description"))
+			http.Error(w, msg, http.StatusBadRequest)
 			return
 		}
 
