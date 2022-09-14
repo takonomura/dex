@@ -159,7 +159,7 @@ type githubConnector struct {
 // needs 'read:org' if 'orgs' or 'org' fields are populated in a config file.
 // Clients can require 'groups' scope without setting 'orgs'/'org'.
 func (c *githubConnector) groupsRequired(groupScope bool) bool {
-	return len(c.orgs) > 0 || c.org != "" || groupScope
+	return len(c.orgs) > 0 || c.org != "" || (groupScope && c.loadAllGroups)
 }
 
 func (c *githubConnector) oauth2Config(scopes connector.Scopes) *oauth2.Config {
