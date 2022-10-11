@@ -68,6 +68,7 @@ type refreshContext struct {
 	storageToken *storage.RefreshToken
 	requestToken *internal.RefreshToken
 
+	connectorID   string
 	connector     Connector
 	connectorData []byte
 
@@ -123,6 +124,7 @@ func (s *Server) getRefreshTokenFromStorage(clientID string, token *internal.Ref
 	refreshCtx.storageToken = &refresh
 
 	// Get Connector
+	refreshCtx.connectorID = refresh.ConnectorID
 	refreshCtx.connector, err = s.getConnector(refresh.ConnectorID)
 	if err != nil {
 		s.logger.Errorf("connector with ID %q not found: %v", refresh.ConnectorID, err)
@@ -193,7 +195,7 @@ func (s *Server) refreshWithConnector(ctx context.Context, rCtx *refreshContext,
 			s.logger.Errorf("failed to refresh identity: %v", err)
 			return ident, newInternalServerError()
 		}
-		newIdent, err = s.opaEvalPolicy(refresh.ConnectorID, newIdent)
+		newIdent, err = s.opaEvalPolicy(rCtx.connectorID, newIdent)
 		if err != nil {
 			var denyErr opaDenyError
 			if errors.As(err, &denyErr) {
