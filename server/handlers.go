@@ -1345,8 +1345,10 @@ func (s *Server) deleteRefreshTokens(connectorID string, userID string) error {
 		switch s.refreshTokenPolicy.tokenReplacementPolicy {
 		case FCFS:
 			return userRefreshTokens[i].CreatedAt.Before(userRefreshTokens[j].CreatedAt)
-		default: // LRU
+		case LRU:
 			return userRefreshTokens[i].LastUsed.Before(userRefreshTokens[j].LastUsed)
+		default:
+			panic(fmt.Sprintf("unknown token replacement policy: %v", s.refreshTokenPolicy.tokenReplacementPolicy))
 		}
 	})
 
