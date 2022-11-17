@@ -8,6 +8,7 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 
 	"github.com/dexidp/dex/pkg/log"
 	"github.com/dexidp/dex/storage"
@@ -24,6 +25,7 @@ const (
 	keysName             = "openid-connect-keys"
 	deviceRequestPrefix  = "device_req/"
 	deviceTokenPrefix    = "device_token/"
+	updateLockPrefix     = "update_lock/"
 
 	// defaultStorageTimeout will be applied to all storage's operations.
 	defaultStorageTimeout = 5 * time.Second
@@ -532,6 +534,19 @@ func (c *conn) txnCreate(ctx context.Context, key string, value interface{}) err
 }
 
 func (c *conn) txnUpdate(ctx context.Context, key string, update func(current []byte) ([]byte, error)) error {
+	s, err := concurrency.NewSession(c.db, concurrency.WithContext(ctx), concurrency.WithTTL(int(defaultStorageTimeout/time.Second)))
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	mu := concurrency.NewMutex(s, updateLockPrefix+key)
+	err = mu.Lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer mu.Unlock(ctx)
+
 	getResp, err := c.db.Get(ctx, key)
 	if err != nil {
 		return err
@@ -550,7 +565,7 @@ func (c *conn) txnUpdate(ctx context.Context, key string, update func(current []
 
 	txn := c.db.Txn(ctx)
 	updateResp, err := txn.
-		If(clientv3.Compare(clientv3.ModRevision(key), "=", modRev)).
+		If(clientv3.Compare(clientv3.ModRevision(key), "=", modRev), mu.IsOwner()).
 		Then(clientv3.OpPut(key, string(updatedValue))).
 		Commit()
 	if err != nil {
