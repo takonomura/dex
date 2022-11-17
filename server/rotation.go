@@ -202,7 +202,8 @@ type RefreshTokenPolicy struct {
 }
 
 func NewRefreshTokenPolicy(logger log.Logger, rotation bool, validIfNotUsedFor, absoluteLifetime, reuseInterval string,
-	allowMultiple bool, maxTokens int, tokenReplacementPolicy string) (*RefreshTokenPolicy, error) {
+	allowMultiple bool, maxTokens int, tokenReplacementPolicy string,
+) (*RefreshTokenPolicy, error) {
 	r := RefreshTokenPolicy{now: time.Now, logger: logger}
 	var err error
 
