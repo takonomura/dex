@@ -8,6 +8,7 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 
 	"github.com/dexidp/dex/pkg/log"
 	"github.com/dexidp/dex/storage"
@@ -24,6 +25,7 @@ const (
 	keysName             = "openid-connect-keys"
 	deviceRequestPrefix  = "device_req/"
 	deviceTokenPrefix    = "device_token/"
+	updateLockPrefix     = "update_lock/"
 
 	// defaultStorageTimeout will be applied to all storage's operations.
 	defaultStorageTimeout = 5 * time.Second
@@ -189,19 +191,60 @@ func (c *conn) GetRefresh(id string) (r storage.RefreshToken, err error) {
 func (c *conn) UpdateRefreshToken(id string, updater func(old storage.RefreshToken) (storage.RefreshToken, error)) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultStorageTimeout)
 	defer cancel()
-	return c.txnUpdate(ctx, keyID(refreshTokenPrefix, id), func(currentValue []byte) ([]byte, error) {
-		var current RefreshToken
-		if len(currentValue) > 0 {
-			if err := json.Unmarshal(currentValue, &current); err != nil {
-				return nil, err
-			}
+
+	key := keyID(refreshTokenPrefix, id)
+
+	s, err := concurrency.NewSession(c.db, concurrency.WithContext(ctx), concurrency.WithTTL(int(defaultStorageTimeout/time.Second)))
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	mu := concurrency.NewMutex(s, updateLockPrefix+key)
+	err = mu.Lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer mu.Unlock(ctx)
+
+	getResp, err := c.db.Get(ctx, key)
+	if err != nil {
+		return err
+	}
+	var currentValue []byte
+	var modRev int64
+	if len(getResp.Kvs) > 0 {
+		currentValue = getResp.Kvs[0].Value
+		modRev = getResp.Kvs[0].ModRevision
+	}
+
+	var current RefreshToken
+	if len(currentValue) > 0 {
+		if err := json.Unmarshal(currentValue, &current); err != nil {
+			return err
 		}
-		updated, err := updater(toStorageRefreshToken(current))
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(fromStorageRefreshToken(updated))
-	})
+	}
+	updated, err := updater(toStorageRefreshToken(current))
+	if err != nil {
+		return err
+	}
+	updatedValue, err := json.Marshal(fromStorageRefreshToken(updated))
+	if err != nil {
+		return err
+	}
+
+	txn := c.db.Txn(ctx)
+	updateResp, err := txn.
+		If(clientv3.Compare(clientv3.ModRevision(key), "=", modRev), mu.IsOwner()).
+		Then(clientv3.OpPut(key, string(updatedValue))).
+		Commit()
+	if err != nil {
+		return err
+	}
+	if !updateResp.Succeeded {
+		return fmt.Errorf("failed to update key=%q: concurrent conflicting update happened", key)
+	}
+	return nil
 }
 
 func (c *conn) DeleteRefresh(id string) error {
