@@ -1342,9 +1342,10 @@ func (s *Server) deleteRefreshTokens(connectorID string, userID string) error {
 	}
 
 	sort.SliceStable(userRefreshTokens, func(i, j int) bool {
-		if s.refreshTokenPolicy.tokenReplacementPolicy == FCFS {
+		switch s.refreshTokenPolicy.tokenReplacementPolicy {
+		case FCFS:
 			return userRefreshTokens[i].CreatedAt.Before(userRefreshTokens[j].CreatedAt)
-		} else {
+		default: // LRU
 			return userRefreshTokens[i].LastUsed.Before(userRefreshTokens[j].LastUsed)
 		}
 	})
