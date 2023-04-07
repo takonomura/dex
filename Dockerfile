@@ -1,6 +1,6 @@
 ARG BASE_IMAGE=alpine
 
-FROM golang:1.19.2-alpine3.16 AS builder
+FROM golang:1.20.2-alpine3.16 AS builder
 
 WORKDIR /usr/local/src/dex
 
@@ -22,26 +22,26 @@ COPY . .
 
 RUN make release-binary
 
-FROM alpine:3.16.2 AS stager
+FROM alpine:3.17.3 AS stager
 
 RUN mkdir -p /var/dex
 RUN mkdir -p /etc/dex
 COPY config.docker.yaml /etc/dex/
 
-FROM alpine:3.16.2 AS gomplate
+FROM alpine:3.17.3 AS gomplate
 
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
 
-ENV GOMPLATE_VERSION=v3.11.2
+ENV GOMPLATE_VERSION=v3.11.4
 
 RUN wget -O /usr/local/bin/gomplate \
     "https://github.com/hairyhenderson/gomplate/releases/download/${GOMPLATE_VERSION}/gomplate_${TARGETOS:-linux}-${TARGETARCH:-amd64}${TARGETVARIANT}" \
     && chmod +x /usr/local/bin/gomplate
 
 # For Dependabot to detect base image versions
-FROM alpine:3.16.2 AS alpine
+FROM alpine:3.17.3 AS alpine
 FROM gcr.io/distroless/static:latest AS distroless
 
 FROM $BASE_IMAGE

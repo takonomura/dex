@@ -373,7 +373,7 @@ func (s *Server) handlePasswordLogin(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		redirectURL, err := s.finalizeLogin(identity, authReq, conn.Connector)
+		redirectURL, canSkipApproval, err := s.finalizeLogin(identity, authReq, conn.Connector)
 		if err != nil {
 			var denyErr opaDenyError
 			if errors.As(err, &denyErr) {
@@ -383,6 +383,17 @@ func (s *Server) handlePasswordLogin(w http.ResponseWriter, r *http.Request) {
 			}
 			s.logger.Errorf("Failed to finalize login: %v", err)
 			s.renderError(r, w, http.StatusInternalServerError, "Login error.")
+			return
+		}
+
+		if canSkipApproval {
+			authReq, err = s.storage.GetAuthRequest(authReq.ID)
+			if err != nil {
+				s.logger.Errorf("Failed to get finalized auth request: %v", err)
+				s.renderError(r, w, http.StatusInternalServerError, "Login error.")
+				return
+			}
+			s.sendCodeResponse(w, r, authReq)
 			return
 		}
 
@@ -467,7 +478,7 @@ func (s *Server) handleConnectorCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	redirectURL, err := s.finalizeLogin(identity, authReq, conn.Connector)
+	redirectURL, canSkipApproval, err := s.finalizeLogin(identity, authReq, conn.Connector)
 	if err != nil {
 		var denyErr opaDenyError
 		if errors.As(err, &denyErr) {
@@ -480,16 +491,27 @@ func (s *Server) handleConnectorCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if canSkipApproval {
+		authReq, err = s.storage.GetAuthRequest(authReq.ID)
+		if err != nil {
+			s.logger.Errorf("Failed to get finalized auth request: %v", err)
+			s.renderError(r, w, http.StatusInternalServerError, "Login error.")
+			return
+		}
+		s.sendCodeResponse(w, r, authReq)
+		return
+	}
+
 	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
 
 // finalizeLogin associates the user's identity with the current AuthRequest, then returns
 // the approval page's path.
-func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.AuthRequest, conn connector.Connector) (string, error) {
+func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.AuthRequest, conn connector.Connector) (string, bool, error) {
 	var err error
 	identity, err = s.opaEvalPolicy(authReq.ConnectorID, identity)
 	if err != nil {
-		return "", fmt.Errorf("evaluate policy: %w", err)
+		return "", false, fmt.Errorf("evaluate policy: %w", err)
 	}
 
 	claims := storage.Claims{
@@ -508,7 +530,7 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 		return a, nil
 	}
 	if err := s.storage.UpdateAuthRequest(authReq.ID, updater); err != nil {
-		return "", fmt.Errorf("failed to update auth request: %v", err)
+		return "", false, fmt.Errorf("failed to update auth request: %v", err)
 	}
 
 	email := claims.Email
@@ -519,7 +541,10 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 	s.logger.Infof("login successful: connector %q, username=%q, preferred_username=%q, email=%q, groups=%q",
 		authReq.ConnectorID, claims.Username, claims.PreferredUsername, email, claims.Groups)
 
-	// TODO: if s.skipApproval or !authReq.ForceApprovalPrompt, we can skip the redirect to /approval and go ahead and send code
+	// we can skip the redirect to /approval and go ahead and send code if it's not required
+	if s.skipApproval || !authReq.ForceApprovalPrompt {
+		return "", true, nil
+	}
 
 	// an HMAC is used here to ensure that the request ID is unpredictable, ensuring that an attacker who intercepted the original
 	// flow would be unable to poll for the result at the /approval endpoint
@@ -530,7 +555,7 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 	returnURL := path.Join(s.issuerURL.Path, "/approval") + "?req=" + authReq.ID + "&hmac=" + base64.RawURLEncoding.EncodeToString(mac)
 	_, ok := conn.(connector.RefreshConnector)
 	if !ok {
-		return returnURL, nil
+		return returnURL, false, nil
 	}
 
 	// Try to retrieve an existing OfflineSession object for the corresponding user.
@@ -538,7 +563,7 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 	if err != nil {
 		if err != storage.ErrNotFound {
 			s.logger.Errorf("failed to get offline session: %v", err)
-			return "", err
+			return "", false, err
 		}
 		offlineSessions := storage.OfflineSessions{
 			UserID:        identity.UserID,
@@ -551,10 +576,10 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 		// the newly received refreshtoken.
 		if err := s.storage.CreateOfflineSessions(offlineSessions); err != nil {
 			s.logger.Errorf("failed to create offline session: %v", err)
-			return "", err
+			return "", false, err
 		}
 
-		return returnURL, nil
+		return returnURL, false, nil
 	}
 
 	// Update existing OfflineSession obj with new RefreshTokenRef.
@@ -565,10 +590,10 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 		return old, nil
 	}); err != nil {
 		s.logger.Errorf("failed to update offline session: %v", err)
-		return "", err
+		return "", false, err
 	}
 
-	return returnURL, nil
+	return returnURL, false, nil
 }
 
 func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
@@ -607,6 +632,8 @@ func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		// TODO: `finalizeLogin()` now sends code directly to client without going through this endpoint,
+		//		 the `if skipApproval { ... }` block needs to be removed after a grace period.
 		if s.skipApproval {
 			s.sendCodeResponse(w, r, authReq)
 			return
